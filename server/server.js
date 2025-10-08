@@ -1,11 +1,17 @@
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+const NODE_ENV = process.env.NODE_ENV || 'development';
 
 app.use(cors());
 app.use(express.json());
+
+if (NODE_ENV === 'production') {
+  app.use(express.static(path.join(__dirname, '../client/build')));
+}
 
 const mockPlayers = [
   { player_id: 1, full_name: "Patrick Mahomes", position: "QB", team: "KC", opponent: "LV" },
@@ -49,6 +55,12 @@ app.post('/api/picks', (req, res) => {
   res.json({ success: true, message: 'Roster submitted successfully!' });
 });
 
-app.listen(PORT, 'localhost', () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+if (NODE_ENV === 'production') {
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, '../client/build', 'index.html'));
+  });
+}
+
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Server running on http://0.0.0.0:${PORT} in ${NODE_ENV} mode`);
 });
