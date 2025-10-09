@@ -1,21 +1,46 @@
 import React from 'react';
-import PlayerSelectionPage from './components/PlayerSelectionPage';
-import './App.css'; // Or your main stylesheet
+import { BrowserRouter as Router, Route, Routes, useParams } from 'react-router-dom';
+
+// Import the new Navbar component
+import Navbar from './components/Navbar'; 
+
+// Import Page Components
+import Register from './pages/Register';
+import Login from './pages/Login';
+import Dashboard from './pages/Dashboard';
+import CreateLeague from './pages/CreateLeague';
+import JoinLeague from './pages/JoinLeague';
+import PlayerSelectionPage from './pages/PlayerSelectionPage';
+
+// Placeholder for a specific league page
+const LeaguePage = () => {
+    const { leagueId } = useParams();
+    return <h2>League Page for ID: {leagueId}</h2>;
+};
+
+// Simple Home Page Component
+const HomePage = () => <h2>Welcome to the Fantasy Football App!</h2>;
 
 function App() {
-  // You would pass the actual leagueId and week from your app's state or props
-  const leagueId = "some-league-id";
-  const week = 5;
-
   return (
-    <div className="App">
-      <header>
-        <h1>My Fantasy League</h1>
-      </header>
-      <main>
-        <PlayerSelectionPage leagueId={leagueId} week={week} />
-      </main>
-    </div>
+    <Router>
+      <div className="App" style={{ padding: '2rem' }}>
+
+        {/* The Navbar will now appear on every page */}
+        <Navbar /> 
+
+        <Routes>
+          <Route path="/" element={<HomePage />} />
+          <Route path="/register" element={<Register />} />
+          <Route path="/login" element={<Login />} />
+          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/create-league" element={<CreateLeague />} />
+          <Route path="/join-league" element={<JoinLeague />} />
+          <Route path="/league/:leagueId" element={<LeaguePage />} />
+          <Route path="/league/:leagueId/week/:week/picks" element={<PlayerSelectionPage />} />
+        </Routes>
+      </div>
+    </Router>
   );
 }
 
