@@ -28,8 +28,6 @@ const Dashboard = () => {
     fetchUserLeagues();
   }, []);
 
-  const currentWeek = 1;
-
   if (isLoading) return <div className="text-center mt-8">Loading...</div>;
   if (error) return <div className="text-center text-red-500 mt-8">{error}</div>;
 
@@ -46,14 +44,11 @@ const Dashboard = () => {
       ) : (
         <div className="space-y-4">
           {leagues.map(league => (
-            <div key={league._id} className="p-6 bg-white rounded-lg shadow-md flex justify-between items-center">
-              <div>
-                <h3 className="text-xl font-semibold text-gray-900">{league.name}</h3>
-                <p className="text-sm text-gray-500">Commissioner: {league.commissioner.username}</p>
-              </div>
-              <Link to={`/league/${league._id}/week/${currentWeek}/picks`} className="bg-green-500 text-white font-bold py-2 px-4 rounded hover:bg-green-600 transition-colors">
-                Make Picks for Week {currentWeek}
+            <div key={league._id} className="p-6 bg-white rounded-lg shadow-md">
+              <Link to={`/league/${league._id}`} className="text-xl font-semibold text-blue-600 hover:underline">
+                <h3>{league.name}</h3>
               </Link>
+              <p className="text-sm text-gray-500 mt-1">Commissioner: {league.commissioner.username}</p>
             </div>
           ))}
         </div>

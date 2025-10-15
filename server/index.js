@@ -2,6 +2,8 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
+const updateAllScores = require('./scripts/updateScores');
+
 require('dotenv').config(); // Loads environment variables from a .env file
 
 // Initialize the Express app
@@ -17,10 +19,15 @@ app.use(express.json());
 // We will uncomment this section in the next step
 
 const MONGO_URI = process.env.MONGO_URI;
-mongoose.connect(MONGO_URI)
-  .then(() => console.log('MongoDB connected successfully.'))
+// Database Connection
+mongoose.connect(process.env.MONGO_URI)
+  .then(() => {
+    console.log('MongoDB connected successfully.');
+    // Run the score update script once on startup
+    console.log('Running initial score update on server start...');
+    updateAllScores();
+  })
   .catch(err => console.error('MongoDB connection error:', err));
-
 
 // --- Routes ---
 // A simple test route to make sure the server is working
@@ -38,11 +45,12 @@ app.use('/api/schedule', require('./routes/scheduleRoutes'));
 app.use('/api/stats', require('./routes/statsRoutes.js')); 
 app.use('/api/state', require('./routes/stateRoutes.js'));
 app.use('/api/projections', require('./routes/projectionRoutes.js'));
+app.use('/api/scores', require('./routes/scoreRoutes.js')); 
+
 // A simple test route to make sure the server is working
 app.get('/', (req, res) => {
   res.send('Hello from the Fantasy Football API!');
 });
-
 
 
 // --- Start the Server ---
@@ -50,3 +58,4 @@ const PORT = process.env.PORT || 5001;
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
+

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import axios from 'axios';
 
 import PlayerFilters from '../components/PlayerFilters';
@@ -23,15 +23,44 @@ const PlayerSelectionPage = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [positionFilter, setPositionFilter] = useState('ALL');
   const [roster, setRoster] = useState({ QB: [], RB: [], WR: [], TE: [], FLEX: [] });
-  
+  const [picksSubmitted, setPicksSubmitted] = useState(false);
+
   const weekNumber = parseInt(week, 10);
+
+  const buildRosterFromPlayers = (playerIds, allPlayersData, stats, projections) => {
+    const newRoster = { QB: [], RB: [], WR: [], TE: [], FLEX: [] };
+    const playerObjects = playerIds.map(playerId => {
+      const player = allPlayersData[playerId];
+      if (!player) return null;
+      const actualStats = stats ? stats[playerId] : null;
+      const projectedStats = projections ? projections[playerId] : null;
+      return {
+        ...player,
+        actualScore: calculatePlayerScore(actualStats, SCORING_RULES),
+        projectedScore: calculatePlayerScore(projectedStats, SCORING_RULES),
+      };
+    }).filter(Boolean);
+    playerObjects.forEach(player => {
+      const { position } = player;
+      if (newRoster[position] && newRoster[position].length < ROSTER_STRUCTURE[position]) {
+        newRoster[position].push(player);
+      } else if (['RB', 'WR', 'TE'].includes(position) && newRoster.FLEX.length < ROSTER_STRUCTURE.FLEX) {
+        newRoster.FLEX.push(player);
+      }
+    });
+    return newRoster;
+  };
 
   useEffect(() => {
     const fetchData = async () => {
       setIsLoading(true);
       setError('');
+      setPicksSubmitted(false);
       try {
+        const token = localStorage.getItem('token');
+        const config = token ? { headers: { 'Authorization': `Bearer ${token}` } } : {};
         const year = new Date().getFullYear();
+
         const [playersRes, scheduleRes, statsRes, stateRes, projectionsRes] = await Promise.all([
           axios.get('/api/players'),
           axios.get(`/api/schedule/${week}`),
@@ -39,11 +68,28 @@ const PlayerSelectionPage = () => {
           axios.get('/api/state/nfl'),
           axios.get(`/api/projections/${year}/${week}`)
         ]);
-        setAllPlayers(playersRes.data);
+
+        const playersData = playersRes.data;
+        const statsData = statsRes.data;
+        const projectionsData = projectionsRes.data;
+
+        setAllPlayers(playersData);
         setSchedule(scheduleRes.data);
-        setWeeklyStats(statsRes.data);
+        setWeeklyStats(statsData);
         setCurrentNflWeek(stateRes.data.week);
-        setWeeklyProjections(projectionsRes.data);
+        setWeeklyProjections(projectionsData);
+
+        if (token) {
+          try {
+            const myPicksRes = await axios.get(`/api/picks/mypicks/league/${leagueId}/week/${week}`, config);
+            if (myPicksRes.data && myPicksRes.data.players) {
+              setRoster(buildRosterFromPlayers(myPicksRes.data.players, playersData, statsData, projectionsData));
+              setPicksSubmitted(true);
+            }
+          } catch (fetchPicksError) {
+            setRoster({ QB: [], RB: [], WR: [], TE: [], FLEX: [] });
+          }
+        }
       } catch (err) {
         setError('Failed to load page data.');
       } finally {
@@ -51,49 +97,32 @@ const PlayerSelectionPage = () => {
       }
     };
     fetchData();
-  }, [week]);
-
-  useEffect(() => {
-    setRoster({ QB: [], RB: [], WR: [], TE: [], FLEX: [] });
-  }, [week]);
+  }, [week, leagueId]);
 
   const filteredPlayers = useMemo(() => {
     if (!allPlayers || Object.keys(allPlayers).length === 0) return [];
-    if (weekNumber >= currentNflWeek){
-      return Object.values(allPlayers)
+    const baseList = Object.values(allPlayers)
       .filter(p => p.active && ['QB', 'RB', 'WR', 'TE'].includes(p.position))
       .filter(p => positionFilter === 'ALL' || p.position === positionFilter)
       .filter(p => p.full_name?.toLowerCase().includes(searchTerm.toLowerCase()))
       .map(player => {
-        const actualStats = weeklyStats[player.player_id];
-        const projectedStats = weeklyProjections[player.player_id];
+        const actualStats = weeklyStats ? weeklyStats[player.player_id] : null;
+        const projectedStats = weeklyProjections ? weeklyProjections[player.player_id] : null;
         return {
           ...player,
           actualScore: calculatePlayerScore(actualStats, SCORING_RULES),
           projectedScore: calculatePlayerScore(projectedStats, SCORING_RULES),
         };
-      })
-      .sort((a, b) => b.projectedScore - a.projectedScore);
-    } 
-    else{
-    return Object.values(allPlayers)
-      .filter(p => p.active && ['QB', 'RB', 'WR', 'TE'].includes(p.position))
-      .filter(p => positionFilter === 'ALL' || p.position === positionFilter)
-      .filter(p => p.full_name?.toLowerCase().includes(searchTerm.toLowerCase()))
-      .map(player => {
-        const actualStats = weeklyStats[player.player_id];
-        const projectedStats = weeklyProjections[player.player_id];
-        return {
-          ...player,
-          actualScore: calculatePlayerScore(actualStats, SCORING_RULES),
-          projectedScore: calculatePlayerScore(projectedStats, SCORING_RULES),
-        };
-      })
-      .sort((a, b) => b.actualScore - a.actualScore);
+      });
+    if (weekNumber >= currentNflWeek) {
+      return baseList.sort((a, b) => b.projectedScore - a.projectedScore);
+    } else {
+      return baseList.sort((a, b) => b.actualScore - a.actualScore);
     }
-    }, [allPlayers, searchTerm, positionFilter, weeklyStats, weeklyProjections]);
-  
+  }, [allPlayers, searchTerm, positionFilter, weeklyStats, weeklyProjections, weekNumber, currentNflWeek]);
+
   const handleAddPlayer = (player) => {
+    if (picksSubmitted) return;
     const { position, player_id } = player;
     const isAlreadyOnRoster = Object.values(roster).flat().some(p => p.player_id === player_id);
     if (isAlreadyOnRoster) return alert("Player is already on your roster.");
@@ -110,61 +139,46 @@ const PlayerSelectionPage = () => {
   };
 
   const handleRemovePlayer = (player, slot) => {
-    setRoster(prev => ({
-      ...prev,
-      [slot]: prev[slot].filter(p => p.player_id !== player.player_id)
-    }));
+    if (picksSubmitted) return;
+    setRoster(prev => ({ ...prev, [slot]: prev[slot].filter(p => p.player_id !== player.player_id) }));
   };
 
   const handleSubmitRoster = async () => {
     const token = localStorage.getItem('token');
     if (!token) return setError('You must be logged in to submit picks.');
-
     const config = { headers: { 'Authorization': `Bearer ${token}` } };
     const playerIds = Object.values(roster).flat().map(p => p.player_id);
-
     if (playerIds.length !== 7) {
         return setError('Your roster is not full.');
     }
-
     try {
       await axios.post('/api/picks', { leagueId, week, players: playerIds }, config);
       alert('Picks submitted successfully!');
-      navigate(`/league/${leagueId}`);
+      setPicksSubmitted(true);
     } catch (err) {
       setError(err.response.data.message || 'Failed to submit picks.');
     }
   };
 
-  const goToPreviousWeek = () => {
-    if (weekNumber > 1) {
-      navigate(`/league/${leagueId}/week/${weekNumber - 1}/picks`);
-    }
-  };
-
-  const goToNextWeek = () => {
-    navigate(`/league/${leagueId}/week/${weekNumber + 1}/picks`);
-  };
-
-  const goToCurrentWeek = () => {
-    if (currentNflWeek) {
-      navigate(`/league/${leagueId}/week/${currentNflWeek}/picks`);
-    }
-  };
+  const goToPreviousWeek = () => navigate(`/league/${leagueId}/week/${weekNumber - 1}/picks`);
+  const goToNextWeek = () => navigate(`/league/${leagueId}/week/${weekNumber + 1}/picks`);
+  const goToCurrentWeek = () => navigate(`/league/${leagueId}/week/${currentNflWeek}/picks`);
 
   if (isLoading) return <div className="text-center mt-8">Loading...</div>;
 
   return (
     <div className="max-w-7xl mx-auto px-4 bg-blue-100">
       <div className="flex items-center justify-center mb-2 pt-2 flex-wrap">
-        <button onClick={goToPreviousWeek} disabled={weekNumber <= 1} className="bg-blue-500 text-white font-bold py-3 px-4 hover:bg-blue-600 transition duration-200 rounded-l disabled:opacity-50 disabled:cursor-not-allowed">
+        <button onClick={goToPreviousWeek} disabled={weekNumber <= 1} className="bg-blue-500 text-white font-bold py-3 px-4 hover:bg-blue-600 rounded-l disabled:opacity-50">
           &lt; Prev
         </button>
-        
-        <h2 className="text-2xl sm:text-3xl font-bold text-gray-800 px-6 py-2 bg-white border-t border-b border-l border-r border-gray-300 rounded">
-          Week {weekNumber}
-        </h2>
-        <button onClick={goToNextWeek} disabled={weekNumber >= 18}  className="bg-blue-500 text-white font-bold py-3 px-4 hover:bg-blue-600 transition duration-200 rounded-r disabled:opacity-50 disabled:cursor-not-allowed">
+        <Link 
+          to={`/league/${leagueId}`}
+          className="text-2xl sm:text-3xl font-bold text-blue-600 px-6 py-2 bg-white border-t border-b border-l border-r border-gray-300 rounded hover:bg-gray-50"
+        >
+          Week {weekNumber} Leaderboard
+        </Link>
+        <button onClick={goToNextWeek} disabled={weekNumber >= 18} className="bg-blue-500 text-white font-bold py-3 px-4 hover:bg-blue-600 rounded-r disabled:opacity-50">
           Next &gt;
         </button>
       </div>
@@ -174,15 +188,18 @@ const PlayerSelectionPage = () => {
             Jump to Current Week
           </button>
         )}
-      </div>  
+      </div>
       {error && <p className="text-center bg-red-100 text-red-700 p-3 rounded-lg mb-2">{error}</p>}
-      
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-1">
-          <RosterView roster={roster} onRemovePlayer={handleRemovePlayer} />
-          <button disabled={Object.values(roster).flat().length < 7 }  
-            onClick={handleSubmitRoster} className="w-full mt-4 bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-4 rounded-lg transition duration-200 text-lg disabled:opacity-50 disabled:cursor-not-allowed">
-            Submit Roster
+          <RosterView roster={roster} onRemovePlayer={handleRemovePlayer} schedule={schedule} picksSubmitted={picksSubmitted} />
+          <button 
+            disabled={picksSubmitted || Object.values(roster).flat().length < 7}
+            onClick={handleSubmitRoster} 
+            className="w-full mt-4 bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-4 rounded-lg transition duration-200 text-lg disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {picksSubmitted ? 'Roster Submitted' : 'Submit Roster'}
           </button>
         </div>
         <div className="lg:col-span-2 bg-white p-3 rounded-lg border mb-2">
@@ -199,8 +216,6 @@ const PlayerSelectionPage = () => {
           />
         </div>
       </div>
-    
-    
     </div>
   );
 };
